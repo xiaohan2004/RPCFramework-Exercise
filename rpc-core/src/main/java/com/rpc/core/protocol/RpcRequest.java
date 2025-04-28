@@ -52,16 +52,4 @@ public class RpcRequest implements Serializable {
                (this.getVersion() != null ? "_" + this.getVersion() : "") + 
                (this.getGroup() != null ? "_" + this.getGroup() : "");
     }
-    
-    @Override
-    public String toString() {
-        return "RpcRequest{" +
-               "serviceName='" + serviceName + '\'' +
-               ", methodName='" + methodName + '\'' +
-               ", parameterTypes=" + Arrays.toString(parameterTypes) +
-               ", parameters=" + Arrays.toString(parameters) +
-               ", version='" + version + '\'' +
-               ", group='" + group + '\'' +
-               '}';
-    }
 } 

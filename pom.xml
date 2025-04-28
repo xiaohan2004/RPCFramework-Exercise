@@ -16,6 +16,7 @@
         <module>rpc-registry</module>
         <module>rpc-common</module>
         <module>rpc-demo</module>
+        <module>test</module>
     </modules>
 
     <properties>

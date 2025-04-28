@@ -16,6 +16,7 @@
         <module>demo-api</module>
         <module>demo-provider</module>
         <module>demo-consumer</module>
+        <module>demo-registry</module>
     </modules>
 
     <dependencies>

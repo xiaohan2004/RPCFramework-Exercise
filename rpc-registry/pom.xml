@@ -17,5 +17,10 @@
             <artifactId>rpc-common</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.rpc</groupId>
+            <artifactId>rpc-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 </project> 

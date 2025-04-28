@@ -101,6 +101,13 @@ public class RpcConfig {
     }
     
     /**
+     * 获取服务器IP地址
+     */
+    public static String getServerIp() {
+        return getProperty("rpc.server.ip", "127.0.0.1");
+    }
+    
+    /**
      * 获取注册中心地址
      */
     public static String getRegistryAddress() {

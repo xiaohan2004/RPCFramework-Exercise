@@ -38,7 +38,7 @@ public class RpcClientProxy implements InvocationHandler {
     /**
      * 超时时间（毫秒）
      */
-    private long timeout = 5000;
+    private long timeout = 20000;
     
     /**
      * 重试次数

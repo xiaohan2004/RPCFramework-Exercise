@@ -57,7 +57,7 @@ public class RpcResponse<T> implements Serializable {
     public static <T> RpcResponse<T> fail(String message) {
         RpcResponse<T> response = new RpcResponse<>();
         response.setCode(FAIL_CODE);
-        response.setMessage(message);
+        response.setMessage(message != null ? message : "未知错误");
         return response;
     }
 
@@ -67,7 +67,16 @@ public class RpcResponse<T> implements Serializable {
     public static <T> RpcResponse<T> fail(Exception e) {
         RpcResponse<T> response = new RpcResponse<>();
         response.setCode(FAIL_CODE);
-        response.setMessage(e.getMessage());
+        response.setMessage(e != null ? e.getMessage() : "未知异常");
         return response;
+    }
+
+    @Override
+    public String toString() {
+        return "RpcResponse{" +
+                "code=" + code +
+                ", message='" + message + '\'' +
+                ", data=" + data +
+                '}';
     }
 } 

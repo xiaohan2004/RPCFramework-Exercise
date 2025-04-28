@@ -29,43 +29,49 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
         // 创建响应消息
         RpcMessage responseMsg = new RpcMessage();
         responseMsg.setRequestId(msg.getRequestId());
+        responseMsg.setSerializationType(msg.getSerializationType());
+        responseMsg.setCompressType(msg.getCompressType());
         
-        // 处理心跳请求
-        if (messageType == RpcProtocol.HEARTBEAT_REQUEST_TYPE) {
-            responseMsg.setMessageType(RpcProtocol.HEARTBEAT_RESPONSE_TYPE);
-            responseMsg.setData("PONG");
-        } else if (messageType == RpcProtocol.REQUEST_TYPE) {
+        if (messageType == RpcProtocol.REQUEST_TYPE) {
             // 处理RPC请求
             RpcRequest request = (RpcRequest) msg.getData();
+            log.debug("处理RPC请求: service={}, method={}", request.getServiceName(), request.getMethodName());
             
             // 交给RpcRequestHandler处理请求
             RpcResponse<Object> response = rpcRequestHandler.handle(request);
+            log.debug("RPC处理结果: code={}, message={}, data={}", 
+                response.getCode(), response.getMessage(), response.getData());
             
             responseMsg.setMessageType(RpcProtocol.RESPONSE_TYPE);
             responseMsg.setData(response);
             
-            // 设置响应状态
-            if (response.getCode() == RpcResponse.SUCCESS_CODE) {
-                responseMsg.setStatus(RpcProtocol.STATUS_SUCCESS);
-            } else {
+            // 确保响应码不为null
+            if (response.getCode() == null) {
+                log.warn("响应码为null，设置为失败状态");
+                response.setCode(RpcResponse.FAIL_CODE);
                 responseMsg.setStatus(RpcProtocol.STATUS_FAIL);
+            } else {
+                // 设置响应状态
+                if (RpcResponse.SUCCESS_CODE.equals(response.getCode())) {
+                    responseMsg.setStatus(RpcProtocol.STATUS_SUCCESS);
+                } else {
+                    responseMsg.setStatus(RpcProtocol.STATUS_FAIL);
+                }
             }
-        }
-        
-        // 发送响应
-        ctx.writeAndFlush(responseMsg);
-    }
-    
-    @Override
-    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-        if (evt instanceof IdleStateEvent) {
-            IdleStateEvent event = (IdleStateEvent) evt;
-            if (event.state() == IdleState.READER_IDLE) {
-                log.warn("长时间未收到客户端消息，关闭连接: {}", ctx.channel().remoteAddress());
-                ctx.close();
-            }
-        } else {
-            super.userEventTriggered(ctx, evt);
+            
+            log.debug("发送RPC响应: requestId={}, status={}, code={}, message={}", 
+                responseMsg.getRequestId(), responseMsg.getStatus(), 
+                response.getCode(), response.getMessage());
+            
+            // 发送响应
+            ctx.writeAndFlush(responseMsg);
+        } else if (messageType == RpcProtocol.HEARTBEAT_REQUEST_TYPE) {
+            // 处理心跳请求
+            log.debug("收到心跳请求: {}", msg.getData());
+            responseMsg.setMessageType(RpcProtocol.HEARTBEAT_RESPONSE_TYPE);
+            responseMsg.setData("PONG");
+            responseMsg.setStatus(RpcProtocol.STATUS_SUCCESS);
+            ctx.writeAndFlush(responseMsg);
         }
     }
     
@@ -73,5 +79,30 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         log.error("服务器处理请求时发生异常", cause);
         ctx.close();
+    }
+    
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        log.info("客户端连接建立: {}", ctx.channel().remoteAddress());
+        super.channelActive(ctx);
+    }
+    
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        log.info("客户端连接断开: {}", ctx.channel().remoteAddress());
+        super.channelInactive(ctx);
+    }
+    
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (evt instanceof IdleStateEvent) {
+            IdleStateEvent event = (IdleStateEvent) evt;
+            if (event.state() == IdleState.READER_IDLE) {
+                log.warn("客户端 {} 长时间未发送数据，关闭连接", ctx.channel().remoteAddress());
+                ctx.close();
+            }
+        } else {
+            super.userEventTriggered(ctx, evt);
+        }
     }
 } 

@@ -47,44 +47,37 @@ public class RpcResponseHandler extends SimpleChannelInboundHandler<RpcMessage> 
         log.debug("客户端收到消息: {}", msg);
         
         byte messageType = msg.getMessageType();
-        // 处理心跳响应
-        if (messageType == RpcProtocol.HEARTBEAT_RESPONSE_TYPE) {
-            log.debug("收到心跳响应: {}", msg.getData());
-            return;
-        }
+        long requestId = msg.getRequestId();
         
         // 处理RPC响应
         if (messageType == RpcProtocol.RESPONSE_TYPE) {
-            long requestId = msg.getRequestId();
             RpcFuture future = pendingRequests.remove(requestId);
             
             if (future != null) {
-                RpcResponse response = (RpcResponse) msg.getData();
-                if (msg.getStatus() == RpcProtocol.STATUS_SUCCESS) {
-                    future.complete(response);
+                Object data = msg.getData();
+                log.debug("响应数据类型: {}, 状态: {}", data != null ? data.getClass().getName() : "null", msg.getStatus());
+                
+                if (data instanceof RpcResponse) {
+                    RpcResponse response = (RpcResponse) data;
+                    log.debug("RPC响应详情: code={}, message={}, data={}", 
+                            response.getCode(), response.getMessage(), response.getData());
+                    
+                    if (msg.getStatus() == RpcProtocol.STATUS_SUCCESS) {
+                        future.complete(response);
+                    } else {
+                        future.completeExceptionally(new RuntimeException(response.getMessage()));
+                    }
                 } else {
-                    future.completeExceptionally(new RuntimeException(response.getMessage()));
+                    log.warn("响应数据类型不是RpcResponse: {}", data != null ? data.getClass().getName() : "null");
+                    future.completeExceptionally(new RuntimeException("响应数据类型错误"));
                 }
             } else {
                 log.warn("收到未知请求ID的响应: {}", requestId);
             }
-        }
-    }
-    
-    @Override
-    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-        if (evt instanceof IdleStateEvent) {
-            IdleStateEvent event = (IdleStateEvent) evt;
-            if (event.state() == IdleState.WRITER_IDLE) {
-                // 发送心跳
-                log.debug("发送心跳");
-                RpcMessage heartbeat = new RpcMessage();
-                heartbeat.setMessageType(RpcProtocol.HEARTBEAT_REQUEST_TYPE);
-                heartbeat.setData("PING");
-                ctx.writeAndFlush(heartbeat);
-            }
+        } else if (messageType == RpcProtocol.HEARTBEAT_RESPONSE_TYPE) {
+            log.debug("收到心跳响应: {}", msg.getData());
         } else {
-            super.userEventTriggered(ctx, evt);
+            log.warn("收到未知类型的消息: {}", messageType);
         }
     }
     

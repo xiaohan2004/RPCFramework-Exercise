@@ -6,6 +6,8 @@ import com.rpc.core.protocol.RpcProtocol;
 import com.rpc.core.protocol.RpcRequest;
 import com.rpc.core.transport.RpcMessageDecoder;
 import com.rpc.core.transport.RpcMessageEncoder;
+import com.rpc.core.transport.SimpleJsonDecoder;
+import com.rpc.core.transport.SimpleJsonEncoder;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -60,14 +62,31 @@ public class NettyClient {
     private final AtomicLong requestIdGenerator = new AtomicLong(0);
     
     /**
+     * 是否使用简化的JSON编解码器
+     */
+    private final boolean useSimpleJson;
+    
+    /**
      * 构造函数
      *
      * @param host 远程主机
      * @param port 远程端口
      */
     public NettyClient(String host, int port) {
+        this(host, port, true);
+    }
+    
+    /**
+     * 构造函数
+     *
+     * @param host 远程主机
+     * @param port 远程端口
+     * @param useSimpleJson 是否使用简化的JSON编解码器
+     */
+    public NettyClient(String host, int port, boolean useSimpleJson) {
         this.remotePeer = new InetSocketAddress(host, port);
         this.responseHandler = new RpcResponseHandler();
+        this.useSimpleJson = useSimpleJson;
         
         // 初始化Netty客户端
         this.eventLoopGroup = new NioEventLoopGroup(4);
@@ -80,14 +99,21 @@ public class NettyClient {
                 .handler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel ch) throws Exception {
-                        ch.pipeline()
-                                // 空闲检测处理器，15秒没有写操作就发送心跳
-                                .addLast(new IdleStateHandler(0, 15, 0, TimeUnit.SECONDS))
-                                // 消息编解码
-                                .addLast(new RpcMessageEncoder())
-                                .addLast(new RpcMessageDecoder())
-                                // 响应处理器
-                                .addLast(responseHandler);
+                        if (useSimpleJson) {
+                            // 使用简化的JSON编解码器
+                            ch.pipeline()
+                                    .addLast(new SimpleJsonEncoder())
+                                    .addLast(new SimpleJsonDecoder())
+                                    .addLast(responseHandler);
+                            log.info("使用简化的JSON编解码器");
+                        } else {
+                            // 使用标准的RPC消息编解码器
+                            ch.pipeline()
+                                    .addLast(new RpcMessageEncoder())
+                                    .addLast(new RpcMessageDecoder())
+                                    .addLast(responseHandler);
+                            log.info("使用标准的RPC消息编解码器");
+                        }
                     }
                 });
     }
@@ -148,6 +174,12 @@ public class NettyClient {
         
         try {
             // 发送请求
+            if (useSimpleJson) {
+                log.debug("使用简化JSON编解码器发送请求, 请求ID: {}", requestId);
+            } else {
+                log.debug("使用标准编解码器发送请求, 请求ID: {}", requestId);
+            }
+            
             channel.writeAndFlush(rpcMessage).addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(ChannelFuture cf) throws Exception {

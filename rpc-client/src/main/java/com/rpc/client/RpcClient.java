@@ -37,18 +37,29 @@ public class RpcClient {
     private final long timeout;
     
     /**
+     * 是否使用简化的JSON编解码器
+     */
+    private final boolean useSimpleJson;
+    
+    /**
      * 构造函数
      */
     public RpcClient() {
         // 读取配置
-        String registryType = RpcConfig.getProperty("rpc.registry.type", ServiceRegistryFactory.LOCAL_REGISTRY);
         String registryAddr = RpcConfig.getRegistryAddress();
+        if (registryAddr == null || registryAddr.isEmpty()) {
+            throw new IllegalArgumentException("注册中心地址不能为空，请在配置文件中设置rpc.registry.address");
+        }
+        
         this.timeout = RpcConfig.getLong("rpc.client.timeout", 5000);
         
-        // 创建注册中心客户端
-        this.serviceRegistry = ServiceRegistryFactory.getServiceRegistry(registryType, registryAddr);
+        // 创建注册中心客户端，消费者端不发送心跳
+        this.serviceRegistry = ServiceRegistryFactory.getServiceRegistry(registryAddr, false);
         
-        log.info("RPC客户端初始化完成, 注册中心: {} {}", registryType, registryAddr);
+        // 读取是否使用简化JSON编解码器的配置
+        this.useSimpleJson = RpcConfig.getBoolean("rpc.client.use.simple.json", true);
+        
+        log.info("RPC客户端初始化完成, 注册中心地址: {}, 使用简化JSON编解码器: {}", registryAddr, useSimpleJson);
     }
     
     /**
@@ -136,7 +147,7 @@ public class RpcClient {
             int port = NetUtil.getPortFromAddress(addr);
             
             try {
-                NettyClient client = new NettyClient(host, port);
+                NettyClient client = new NettyClient(host, port, useSimpleJson);
                 client.connect().get();
                 return client;
             } catch (Exception e) {

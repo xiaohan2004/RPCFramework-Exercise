@@ -80,7 +80,16 @@ public class RpcFuture extends CompletableFuture<RpcResponse> {
             throw new RuntimeException("RPC调用响应为空");
         }
         
-        if (response.getCode() != RpcResponse.SUCCESS_CODE) {
+        log.debug("收到RPC响应: code={}, message={}, data={}", response.getCode(), response.getMessage(), response.getData());
+        
+        if (response.getCode() == null) {
+            log.error("RPC响应码为null，默认视为成功");
+            response.setCode(RpcResponse.SUCCESS_CODE);
+            return response;
+        }
+        
+        if (!RpcResponse.SUCCESS_CODE.equals(response.getCode())) {
+            log.error("RPC调用失败: code={}, message={}", response.getCode(), response.getMessage());
             throw new RuntimeException("RPC调用失败: " + response.getMessage());
         }
         

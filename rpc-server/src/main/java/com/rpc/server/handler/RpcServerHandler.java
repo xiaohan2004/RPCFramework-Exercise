@@ -6,6 +6,8 @@ import com.rpc.core.protocol.RpcRequest;
 import com.rpc.core.protocol.RpcResponse;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.timeout.IdleState;
+import io.netty.handler.timeout.IdleStateEvent;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -52,6 +54,19 @@ public class RpcServerHandler extends SimpleChannelInboundHandler<RpcMessage> {
         
         // 发送响应
         ctx.writeAndFlush(responseMsg);
+    }
+    
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (evt instanceof IdleStateEvent) {
+            IdleStateEvent event = (IdleStateEvent) evt;
+            if (event.state() == IdleState.READER_IDLE) {
+                log.warn("长时间未收到客户端消息，关闭连接: {}", ctx.channel().remoteAddress());
+                ctx.close();
+            }
+        } else {
+            super.userEventTriggered(ctx, evt);
+        }
     }
     
     @Override

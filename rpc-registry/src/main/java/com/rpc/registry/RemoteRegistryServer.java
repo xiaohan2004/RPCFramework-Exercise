@@ -69,16 +69,6 @@ public class RemoteRegistryServer {
     private static final long HEARTBEAT_CHECK_INTERVAL = 10000; // 修改为10秒检查一次
     
     /**
-     * 服务被标记为不可用后，实际删除前的等待时间（毫秒）
-     */
-    private static final long SERVICE_REMOVAL_DELAY = 300000; // 5分钟后才真正删除
-    
-    /**
-     * 不可用服务映射，key为服务地址，value为被标记为不可用的时间
-     */
-    private final Map<String, Long> unavailableServices = new ConcurrentHashMap<>();
-    
-    /**
      * Debug模式
      */
     private final boolean debug;
@@ -192,62 +182,34 @@ public class RemoteRegistryServer {
         log.info("心跳检查线程已启动，检查间隔: {}秒，超时时间: {}秒", 
                 HEARTBEAT_CHECK_INTERVAL/1000, HEARTBEAT_TIMEOUT/1000);
     }
-    
+
     /**
      * 检查心跳超时的服务
      */
     private void checkHeartbeats() {
         long now = System.currentTimeMillis();
-        int markedUnavailable = 0;
         int actuallyRemoved = 0;
-        
-        // 检查需要标记为不可用的服务
+
+        // 检查需要移除的服务
+        List<String> addressesToRemove = new ArrayList<>();
         for (Map.Entry<String, Long> entry : heartbeatMap.entrySet()) {
             String address = entry.getKey();
             long lastHeartbeat = entry.getValue();
-            
+
             if (now - lastHeartbeat > HEARTBEAT_TIMEOUT) {
-                // 将服务标记为不可用
-                unavailableServices.putIfAbsent(address, now);
-                markedUnavailable++;
-                log.warn("服务心跳超时，标记为不可用: {}, 上次心跳: {}毫秒前", 
-                        address, now - lastHeartbeat);
-            }
-        }
-        
-        // 检查需要真正移除的服务
-        List<String> addressesToRemove = new ArrayList<>();
-        for (Map.Entry<String, Long> entry : unavailableServices.entrySet()) {
-            String address = entry.getKey();
-            long markedTime = entry.getValue();
-            
-            // 如果服务恢复了心跳，从不可用列表中移除
-            if (heartbeatMap.containsKey(address) && 
-                now - heartbeatMap.get(address) <= HEARTBEAT_TIMEOUT) {
-                log.info("服务恢复心跳，重新标记为可用: {}", address);
-                unavailableServices.remove(address);
-                continue;
-            }
-            
-            // 如果超过了删除延迟时间，真正删除服务
-            if (now - markedTime > SERVICE_REMOVAL_DELAY) {
                 addressesToRemove.add(address);
-                actuallyRemoved++;
-                log.warn("服务持续不可用{}分钟，将移除注册信息: {}", 
-                        SERVICE_REMOVAL_DELAY / 60000, address);
+                log.warn("服务心跳超时，立即移除: {}, 上次心跳: {}毫秒前", address, now - lastHeartbeat);
             }
         }
-        
+
         // 执行实际删除操作
         for (String address : addressesToRemove) {
             removeService(address);
-            unavailableServices.remove(address);
+            actuallyRemoved++;
         }
-        
-        // 输出统计信息
-        if (markedUnavailable > 0 || actuallyRemoved > 0) {
-            log.info("心跳检查完成: 标记不可用: {}, 实际移除: {}, 当前服务数: {}", 
-                    markedUnavailable, actuallyRemoved, getServiceCount());
+
+        if (actuallyRemoved > 0) {
+            log.info("心跳检查完成: 实际移除服务: {}, 当前服务数: {}", actuallyRemoved, getServiceCount());
         } else {
             log.debug("心跳检查完成: 所有服务心跳正常, 当前服务数: {}", getServiceCount());
         }
@@ -443,7 +405,7 @@ public class RemoteRegistryServer {
         log.info("发现了{}个服务实例: {}", serviceList.size(), serviceKey);
         return new ArrayList<>(serviceList);
     }
-    
+
     /**
      * 更新服务心跳
      */
@@ -452,27 +414,13 @@ public class RemoteRegistryServer {
             log.warn("尝试更新心跳但地址为空");
             return;
         }
-        
+
         long now = System.currentTimeMillis();
-        Long lastHeartbeat = heartbeatMap.put(address, now);
-        
-        // 如果服务之前被标记为不可用，现在恢复了心跳，从不可用列表中移除
-        if (unavailableServices.containsKey(address)) {
-            long unavailableTime = now - unavailableServices.remove(address);
-            log.info("服务恢复心跳并标记为可用: {}, 不可用持续时间: {}秒", address, unavailableTime / 1000);
-        }
-        
-        if (lastHeartbeat != null) {
-            long interval = now - lastHeartbeat;
-            // 只有当间隔较大或日志级别为DEBUG时才记录心跳
-            if (interval > HEARTBEAT_TIMEOUT / 2 || log.isDebugEnabled()) {
-                log.debug("更新服务心跳: {}, 距上次心跳: {}秒", address, interval / 1000);
-            }
-        } else {
-            log.info("首次收到服务心跳: {}", address);
-        }
+        heartbeatMap.put(address, now);
+
+        log.debug("更新服务心跳: {}", address);
     }
-    
+
     /**
      * 获取所有已注册的服务
      */

@@ -527,3 +527,141 @@ public class SimpleConditionDemo {
 2. 在调用服务之前必须注册本地服务实现，否则当需要使用本地服务时会回退到远程服务
 3. 自定义条件处理器应在使用前注册
 4. 当条件字符串为空时，默认使用远程服务 
+
+## 服务回退与错误处理机制
+
+框架提供了完整的服务回退与友好错误处理机制，确保即使在服务不可用时，系统仍能正常运行。
+
+### 特性
+
+1. **服务发现失败的优雅处理**：
+   - 当找不到远程服务实例时不再直接抛出异常
+   - 对于开启了`enableLocalService`的情况，自动尝试本地服务
+   - 提供默认回退服务机制，确保返回符合接口规范的值
+
+2. **回退服务机制**：
+   - 为接口添加指定的回退实现，作为服务不可用时的替代方案
+   - 自动生成默认回退服务，根据方法返回类型提供合适的默认值
+   - 多级回退策略：远程服务 -> 本地服务 -> 回退服务 -> 默认值
+
+3. **友好的错误处理**：
+   - 为不同的返回类型提供适当的默认值而非抛出异常
+   - 对于String类型返回预设错误消息
+   - 对于集合类型返回空集合
+   - 对于Future类型返回已完成的异常Future
+
+### 使用方式
+
+#### 1. 注册本地服务和回退服务
+
+```java
+// 注册本地服务实现
+LocalServiceFactory.registerLocalService(UserService.class, new LocalUserServiceImpl());
+
+// 注册回退服务实现
+LocalServiceFactory.registerFallbackService(UserService.class, new FallbackUserServiceImpl());
+```
+
+#### 2. 自动创建默认回退服务
+
+```java
+// 获取本地服务，如不存在则创建默认回退服务
+Object service = LocalServiceFactory.getLocalServiceWithFallback(
+    serviceName, version, group, true);
+```
+
+#### 3. 开启RPC引用的本地服务支持
+
+```java
+@RpcReference(
+    version = "1.0.0",
+    enableLocalService = true  // 开启本地服务支持
+)
+private UserService userService;
+```
+
+### 配置项说明
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| enableLocalService | 是否启用本地服务 | false |
+| condition | 本地服务条件表达式 | "" |
+
+### 工作流程
+
+1. 客户端发起RPC调用
+2. 框架尝试发现远程服务实例
+3. 如服务发现失败：
+   - 若`enableLocalService=true`：尝试使用本地服务
+   - 若本地服务不存在：尝试使用回退服务
+   - 若回退服务不存在：返回友好的错误响应（非异常）
+4. 如服务调用出现其他错误：返回友好的错误响应
+
+### 远程调用失败时回退本地服务
+
+为提高系统可用性，框架现在支持在远程调用过程中失败时回退到本地服务：
+
+1. **多层次回退机制**：
+   - 条件评估初始决定是使用远程还是本地服务
+   - 若选择远程服务但服务发现失败，自动回退到本地服务
+   - 即使在远程调用执行过程中失败（如ExecutionException），也能正确回退到本地服务
+
+2. **异常处理增强**：
+   - 捕获并检查执行异常中的"未找到服务提供者"关键信息
+   - 在检测到服务不可用时，自动切换到本地实现或回退服务
+   - 保留原始异常信息以便更精确地诊断问题
+
+3. **计数条件服务支持**：
+   - 支持使用计数条件（如`count3`）交替使用远程和本地服务
+   - 即使在计数条件决定使用远程服务但远程服务不可用时，也能回退到本地服务
+
+```java
+// 示例：使用计数条件服务（每3次调用使用1次远程服务）
+@RpcReference(
+    version = "1.0.0",
+    enableLocalService = true,
+    condition = "count3"  // 每3次调用时选择1次远程服务
+)
+private HelloService countService;
+
+// 即使当计数器触发远程调用但远程服务不可用时，
+// 系统也会自动回退到本地服务，确保调用不会失败
+```
+
+这个增强解决了在远程服务不可用、网络出现问题或远程执行异常时，系统能始终提供服务的能力，大大提高了系统的弹性和可用性。
+
+### 示例代码
+
+```java
+// 服务接口
+public interface UserService {
+    String getUserName(Long userId);
+    int getUserAge(Long userId);
+    boolean userExists(Long userId);
+}
+
+// 回退服务实现
+public class FallbackUserService implements UserService {
+    @Override
+    public String getUserName(Long userId) {
+        return "[回退服务] 无法获取用户名，服务不可用";
+    }
+    
+    @Override
+    public int getUserAge(Long userId) {
+        return -1; // 表示未知年龄
+    }
+    
+    @Override
+    public boolean userExists(Long userId) {
+        log.warn("回退服务：无法验证用户是否存在，默认返回false");
+        return false;
+    }
+}
+
+// 使用示例
+UserService userService = client.getRemoteService(UserService.class);
+String userName = userService.getUserName(123L);  // 即使服务不可用也不会抛异常
+```
+
+更多示例请参考`ServiceFallbackDemo`类。 

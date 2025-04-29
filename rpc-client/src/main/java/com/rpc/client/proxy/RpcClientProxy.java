@@ -249,6 +249,9 @@ public class RpcClientProxy implements InvocationHandler {
         log.debug("RPC调用详情: 版本={}, 分组={}, 超时={}ms, 启用本地服务={}, 条件='{}'",
                 version, group, timeout, enableLocalService, condition);
         
+        // 标记是否已经尝试使用本地服务
+        boolean useLocalService = false;
+        
         // 检查是否应该使用本地服务
         if (enableLocalService) {
             log.debug("本地服务已启用(enableLocalService=true)，条件: '{}'", 
@@ -283,7 +286,7 @@ public class RpcClientProxy implements InvocationHandler {
                 }
             };
             
-            boolean useLocalService = ConditionEvaluator.shouldUseLocalService(localReference);
+            useLocalService = ConditionEvaluator.shouldUseLocalService(localReference);
             
             if (useLocalService) {
                 // 获取本地服务实例
@@ -321,52 +324,124 @@ public class RpcClientProxy implements InvocationHandler {
         RpcFuture future = null;
         Exception lastException = null;
         
-        // 重试机制
-        for (int i = 0; i <= retries; i++) {
-            try {
-                log.debug("发送RPC请求{}: {}.{}", i > 0 ? " (重试 " + i + ")" : "", serviceName, methodName);
-                future = rpcClient.sendRequest(request, timeout);
-                log.debug("RPC请求已发送，等待响应");
-                break;
-            } catch (Exception e) {
-                lastException = e;
-                log.error("RPC调用失败，正在重试 {}/{}: {}", i + 1, retries, e.getMessage());
-                if (i == retries) {
-                    log.error("RPC调用失败，已达到最大重试次数: {}", retries);
-                    throw e;
+        try {
+            // 尝试发送请求，可能抛出服务发现失败异常
+            for (int i = 0; i <= retries; i++) {
+                try {
+                    log.debug("发送RPC请求{}: {}.{}", i > 0 ? " (重试 " + i + ")" : "", serviceName, methodName);
+                    future = rpcClient.sendRequest(request, timeout);
+                    log.debug("RPC请求已发送，等待响应");
+                    break;
+                } catch (Exception e) {
+                    lastException = e;
+                    
+                    // 检查是否是服务发现失败的异常
+                    if (e instanceof RuntimeException) {
+                        
+                        log.warn("服务发现失败: {}", e.getMessage());
+                        
+                        // 如果允许使用本地服务
+                        if (enableLocalService) {
+                            log.info("尝试回退到本地服务: {}.{}", serviceName, methodName);
+                            
+                            // 尝试获取本地服务或回退服务
+                            Object localService = LocalServiceFactory.getLocalServiceWithFallback(serviceName, version, group, true);
+                            
+                            if (localService != null) {
+                                log.info("回退使用本地/回退服务: {}.{}", serviceName, methodName);
+                                Object result = method.invoke(localService, args);
+                                log.debug("本地/回退服务调用完成: {}.{}, 结果类型: {}", 
+                                        serviceName, methodName, 
+                                        result != null ? result.getClass().getName() : "null");
+                                return result;
+                            }
+                        }
+                        
+                        // 如果没有本地服务或未启用，创建友好错误信息而不是抛出异常
+                        log.error("无法找到服务实例，远程调用失败: {}.{}, 版本: {}, 分组: {}", 
+                                serviceName, methodName, version, group);
+                        
+                        // 基于返回类型创建一个友好的错误响应
+                        return createFriendlyErrorResponse(method.getReturnType(), 
+                                "无法找到服务实例: " + serviceName);
+                    }
+                    
+                    log.error("RPC调用失败，正在重试 {}/{}: {}", i + 1, retries, e.getMessage());
+                    if (i == retries) {
+                        log.error("RPC调用失败，已达到最大重试次数: {}", retries);
+                        break;
+                    }
+                    
+                    // 短暂等待后重试
+                    try {
+                        Thread.sleep(1000); // 等待1秒后重试
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("RPC调用被中断", ie);
+                    }
                 }
             }
-        }
-        
-        if (future == null) {
-            log.error("RPC调用失败，无法获取响应Future");
-            throw lastException != null ? lastException : new RuntimeException("RPC调用失败");
-        }
-        
-        // 如果是异步调用，直接返回Future
-        if (async) {
-            log.debug("异步调用模式，直接返回Future");
-            return convertToReturnType(future, method.getReturnType());
-        }
-        
-        // 同步调用，等待结果
-        try {
-            log.debug("同步调用模式，等待结果，超时时间: {}ms", timeout);
-            Object result = future.getData(timeout, TimeUnit.MILLISECONDS);
-            log.info("RPC调用成功完成: {}.{}, 结果类型: {}", 
-                    serviceName, methodName, 
-                    result != null ? result.getClass().getName() : "null");
-            return result;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("RPC调用被中断: {}.{}", serviceName, methodName);
-            throw new RuntimeException("RPC调用被中断", e);
-        } catch (ExecutionException e) {
-            log.error("RPC调用执行异常: {}.{}, 错误: {}", serviceName, methodName, e.getCause().getMessage());
-            throw new RuntimeException("RPC调用执行异常", e.getCause());
-        } catch (TimeoutException e) {
-            log.error("RPC调用超时: {}.{}, 超时时间: {}ms", serviceName, methodName, timeout);
-            throw new RuntimeException("RPC调用超时", e);
+            
+            if (future == null) {
+                if (lastException != null) {
+                    // 创建友好的错误响应而不是抛出异常
+                    return createFriendlyErrorResponse(method.getReturnType(), 
+                            "RPC调用失败: " + lastException.getMessage());
+                }
+                return createFriendlyErrorResponse(method.getReturnType(), "RPC调用失败：未知错误");
+            }
+            
+            // 如果是异步调用，直接返回Future
+            if (async) {
+                log.debug("异步调用模式，直接返回Future");
+                return convertToReturnType(future, method.getReturnType());
+            }
+            
+            // 同步调用，等待结果
+            try {
+                log.debug("同步调用模式，等待结果，超时时间: {}ms", timeout);
+                Object result = future.getData(timeout, TimeUnit.MILLISECONDS);
+                log.info("RPC调用成功完成: {}.{}, 结果类型: {}", 
+                        serviceName, methodName, 
+                        result != null ? result.getClass().getName() : "null");
+                return result;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("RPC调用被中断: {}.{}", serviceName, methodName);
+                return createFriendlyErrorResponse(method.getReturnType(), "RPC调用被中断");
+            } catch (ExecutionException e) {
+                log.error("RPC调用执行异常: {}.{}, 错误: {}", serviceName, methodName, e.getCause().getMessage());
+
+                if (enableLocalService) {
+                    log.info("检测到服务发现失败异常，尝试回退到本地服务: {}.{}", serviceName, methodName);
+                    
+                    // 尝试获取本地服务或回退服务，忽略条件评估，直接使用本地服务
+                    Object localService = LocalServiceFactory.getLocalServiceWithFallback(serviceName, version, group, true);
+                    
+                    if (localService != null) {
+                        log.info("执行异常后回退到本地/回退服务: {}.{}", serviceName, methodName);
+                        try {
+                            Object result = method.invoke(localService, args);
+                            log.debug("本地/回退服务调用完成: {}.{}, 结果类型: {}", 
+                                    serviceName, methodName, 
+                                    result != null ? result.getClass().getName() : "null");
+                            return result;
+                        } catch (Exception localEx) {
+                            log.error("本地/回退服务调用失败: {}", localEx.getMessage());
+                            // 如果本地服务调用也失败，继续返回原来的错误响应
+                        }
+                    }
+                }
+                
+                return createFriendlyErrorResponse(method.getReturnType(), "RPC调用执行异常: " + e.getCause().getMessage());
+            } catch (TimeoutException e) {
+                log.error("RPC调用超时: {}.{}, 超时时间: {}ms", serviceName, methodName, timeout);
+                return createFriendlyErrorResponse(method.getReturnType(), "RPC调用超时，超时时间: " + timeout + "ms");
+            }
+        } catch (Exception unexpected) {
+            // 完全意外的异常，记录日志
+            log.error("RPC调用过程中发生意外异常: {}", unexpected.getMessage(), unexpected);
+            return createFriendlyErrorResponse(method.getReturnType(), "RPC调用出现意外错误: " + unexpected.getMessage());
         }
     }
     
@@ -410,5 +485,72 @@ public class RpcClientProxy implements InvocationHandler {
         
         // 默认返回RpcFuture
         return future;
+    }
+    
+    /**
+     * 创建友好的错误响应对象，根据返回类型返回适当的默认值或错误信息
+     * 
+     * @param returnType 方法返回类型
+     * @param errorMessage 错误信息
+     * @return 适合返回类型的响应对象
+     */
+    private Object createFriendlyErrorResponse(Class<?> returnType, String errorMessage) {
+        log.debug("为返回类型 {} 创建友好错误响应: {}", returnType.getName(), errorMessage);
+        
+        // 如果是void，直接返回null
+        if (returnType == void.class || returnType == Void.class) {
+            return null;
+        }
+        
+        // 如果是基本类型，返回对应的默认值
+        if (returnType.isPrimitive()) {
+            if (returnType == boolean.class) {
+                return false;
+            } else if (returnType == char.class) {
+                return '\0';
+            } else if (returnType == byte.class || returnType == short.class || 
+                    returnType == int.class || returnType == long.class || 
+                    returnType == float.class || returnType == double.class) {
+                return 0;
+            }
+        }
+        
+        // 如果是Future类型，返回带有异常的CompletableFuture
+        if (returnType == CompletableFuture.class) {
+            CompletableFuture<Object> future = new CompletableFuture<>();
+            future.completeExceptionally(new RuntimeException(errorMessage));
+            return future;
+        }
+        
+        // 如果是RpcFuture类型，返回带有异常的RpcFuture
+        if (returnType == RpcFuture.class) {
+            RpcFuture future = new RpcFuture(0, 0);
+            future.completeExceptionally(new RuntimeException(errorMessage));
+            return future;
+        }
+        
+        // 对于String类型，返回错误消息
+        if (returnType == String.class) {
+            return "错误: " + errorMessage;
+        }
+        
+        // 对于Optional类型，返回empty
+        if (returnType == java.util.Optional.class) {
+            return java.util.Optional.empty();
+        }
+        
+        // 对于集合类型，返回空集合
+        if (java.util.Collection.class.isAssignableFrom(returnType)) {
+            if (returnType == java.util.List.class || returnType == java.util.ArrayList.class) {
+                return new java.util.ArrayList<>();
+            } else if (returnType == java.util.Set.class || returnType == java.util.HashSet.class) {
+                return new java.util.HashSet<>();
+            } else if (returnType == java.util.Map.class || returnType == java.util.HashMap.class) {
+                return new java.util.HashMap<>();
+            }
+        }
+        
+        // 其他对象类型，返回null
+        return null;
     }
 } 

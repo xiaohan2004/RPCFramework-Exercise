@@ -171,7 +171,11 @@ public class RpcClient {
                 request.getServiceName(), request.getVersion(), request.getGroup());
         
         if (serviceInfos == null || serviceInfos.isEmpty()) {
-            throw new RuntimeException("未找到服务提供者: " + request.getRpcServiceKey());
+            log.warn("未找到服务提供者: {}", request.getRpcServiceKey());
+            // 创建一个已完成的异常Future而不是抛出异常
+            RpcFuture errorFuture = new RpcFuture(0, timeout);
+            errorFuture.completeExceptionally(new RuntimeException("未找到服务提供者: " + request.getRpcServiceKey()));
+            return errorFuture;
         }
         
         // 简单的随机负载均衡
@@ -206,14 +210,19 @@ public class RpcClient {
                         Thread.sleep(1000); // 等待1秒后重试
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
-                        throw new RuntimeException("发送请求被中断", ie);
+                        RpcFuture errorFuture = new RpcFuture(0, timeout);
+                        errorFuture.completeExceptionally(new RuntimeException("发送请求被中断", ie));
+                        return errorFuture;
                     }
                 }
             }
         }
         
-        // 如果所有重试都失败了，抛出最后的异常
-        throw new RuntimeException("发送RPC请求失败，已重试1次", lastException);
+        // 如果所有重试都失败了，返回错误Future而不是抛出异常
+        log.error("发送RPC请求失败，已重试1次: {}", lastException != null ? lastException.getMessage() : "未知错误");
+        RpcFuture errorFuture = new RpcFuture(0, timeout);
+        errorFuture.completeExceptionally(new RuntimeException("发送RPC请求失败，已重试1次", lastException));
+        return errorFuture;
     }
     
     /**

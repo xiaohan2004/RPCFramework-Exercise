@@ -47,6 +47,14 @@ public class SimpleConditionDemo {
         condition = ""
     )
     private HelloService alwaysRemoteService;
+
+    // 测试远程服务失效，enableLocalService为false时，不应该使用本地服务
+    @RpcReference(
+        version = "1.0.0",
+        enableLocalService = false,
+        condition = ""
+    )
+    private HelloService alwaysRemoteServiceFail;
     
     static {
         // 注册自定义条件处理器，处理count开头的条件
@@ -116,6 +124,10 @@ public class SimpleConditionDemo {
         System.out.println("\n=== 测试始终远程服务 ===");
         System.out.println("始终远程服务返回: " + alwaysRemoteService.sayHello("David"));
         System.out.println("始终远程服务时间: " + alwaysRemoteService.getServerTime());
+
+        System.out.println("\n=== 测试远程服务失效 ===");
+        System.out.println("远程服务失效返回: " + alwaysRemoteServiceFail.sayHello("Eve"));
+        System.out.println("远程服务失效时间: " + alwaysRemoteServiceFail.getServerTime());
     }
     
     public static void main(String[] args) {

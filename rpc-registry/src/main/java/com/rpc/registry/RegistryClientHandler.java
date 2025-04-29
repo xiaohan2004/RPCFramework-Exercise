@@ -15,9 +15,11 @@ import lombok.extern.slf4j.Slf4j;
 public class RegistryClientHandler extends SimpleChannelInboundHandler<RpcMessage> {
     
     private final RemoteServiceRegistry registry;
+    private final boolean enableHeartbeat;
     
     public RegistryClientHandler(RemoteServiceRegistry registry) {
         this.registry = registry;
+        this.enableHeartbeat = registry.isHeartbeatEnabled();
     }
     
     @Override
@@ -71,8 +73,12 @@ public class RegistryClientHandler extends SimpleChannelInboundHandler<RpcMessag
         if (evt instanceof IdleStateEvent) {
             IdleStateEvent event = (IdleStateEvent) evt;
             if (event.state() == IdleState.WRITER_IDLE) {
-                log.debug("触发写空闲事件，发送心跳");
-                // 由RemoteServiceRegistry的心跳线程处理，这里不需要额外操作
+                // 只有在启用心跳的情况下才处理写空闲事件
+                if (enableHeartbeat) {
+                    log.debug("触发写空闲事件，发送心跳");
+                    // 发送心跳由RemoteServiceRegistry的心跳线程处理
+                    registry.sendHeartbeatPublic();
+                }
             }
         } else {
             super.userEventTriggered(ctx, evt);

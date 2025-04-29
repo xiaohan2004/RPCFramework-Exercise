@@ -4,6 +4,7 @@ import com.rpc.client.transport.RpcFuture;
 import com.rpc.core.protocol.RpcMessage;
 import com.rpc.core.protocol.RpcProtocol;
 import com.rpc.core.protocol.RpcResponse;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.timeout.IdleState;
@@ -17,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * RPC响应处理器
  */
 @Slf4j
+@ChannelHandler.Sharable
 public class RpcResponseHandler extends SimpleChannelInboundHandler<RpcMessage> {
     /**
      * 未完成的请求映射，key为请求ID，value为请求Future

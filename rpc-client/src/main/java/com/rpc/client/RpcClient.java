@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * RPC客户端
@@ -177,11 +178,42 @@ public class RpcClient {
         ServiceInfo serviceInfo = serviceInfos.get(ThreadLocalRandom.current().nextInt(serviceInfos.size()));
         String address = serviceInfo.getAddress();
         
-        // 获取或创建Netty客户端
-        NettyClient client = getOrCreateClient(address);
+        // 尝试发送请求，包含重试逻辑
+        Exception lastException = null;
+        for (int retryCount = 0; retryCount <= 1; retryCount++) { // 最多重试一次
+            try {
+                // 获取或创建Netty客户端（内部会处理连接状态）
+                NettyClient client = getOrCreateClient(address);
+                
+                // 发送请求
+                log.debug("发送RPC请求到 {}, 重试次数: {}", address, retryCount);
+                return client.sendRequest(request, timeout);
+            } catch (Exception e) {
+                lastException = e;
+                log.warn("发送RPC请求失败: {}, 重试次数: {}/{}, 错误: {}", 
+                        address, retryCount, 1, e.getMessage());
+                
+                // 如果是连接问题，移除客户端实例，下次循环会重新创建
+                if (e instanceof RuntimeException && 
+                        e.getMessage() != null && e.getMessage().contains("连接RPC服务器失败")) {
+                    log.info("检测到服务连接问题，移除客户端实例: {}", address);
+                    clientMap.remove(address);
+                }
+                
+                // 如果还可以重试，等待一小段时间后继续
+                if (retryCount < 1) {
+                    try {
+                        Thread.sleep(1000); // 等待1秒后重试
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("发送请求被中断", ie);
+                    }
+                }
+            }
+        }
         
-        // 发送请求
-        return client.sendRequest(request, timeout);
+        // 如果所有重试都失败了，抛出最后的异常
+        throw new RuntimeException("发送RPC请求失败，已重试1次", lastException);
     }
     
     /**
@@ -191,18 +223,52 @@ public class RpcClient {
      * @return Netty客户端
      */
     private NettyClient getOrCreateClient(String address) {
-        return clientMap.computeIfAbsent(address, addr -> {
-            String host = NetUtil.getHostFromAddress(addr);
-            int port = NetUtil.getPortFromAddress(addr);
-            
+        // 先从缓存中获取
+        NettyClient client = clientMap.get(address);
+        
+        // 如果客户端存在但不活跃，尝试重连
+        if (client != null && !client.isActive()) {
+            log.warn("检测到客户端连接不活跃: {}, 尝试重新连接", address);
             try {
-                NettyClient client = new NettyClient(host, port, useSimpleJson);
-                client.connect().get();
+                // 重新连接
+                client.connect().get(5, TimeUnit.SECONDS);
+                log.info("客户端重连成功: {}", address);
                 return client;
             } catch (Exception e) {
-                throw new RuntimeException("连接RPC服务器失败: " + addr, e);
+                log.error("客户端重连失败: {}, 错误: {}", address, e.getMessage());
+                
+                // 连接失败，关闭旧连接并从映射中移除
+                client.close();
+                clientMap.remove(address);
+                
+                // 创建新的客户端对象
+                log.info("创建新的客户端连接: {}", address);
+                client = null;
             }
-        });
+        }
+        
+        // 如果客户端不存在或已被移除，创建新的
+        if (client == null) {
+            String host = NetUtil.getHostFromAddress(address);
+            int port = NetUtil.getPortFromAddress(address);
+            
+            try {
+                client = new NettyClient(host, port, useSimpleJson);
+                client.connect().get(5, TimeUnit.SECONDS);
+                
+                // 连接成功后放入映射表
+                clientMap.put(address, client);
+                log.info("成功创建并连接到服务: {}", address);
+            } catch (Exception e) {
+                // 创建或连接失败
+                if (client != null) {
+                    client.close();
+                }
+                throw new RuntimeException("连接RPC服务器失败: " + address, e);
+            }
+        }
+        
+        return client;
     }
     
     /**

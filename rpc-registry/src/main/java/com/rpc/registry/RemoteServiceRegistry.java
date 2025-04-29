@@ -148,9 +148,16 @@ public class RemoteServiceRegistry implements ServiceRegistry {
                         log.debug("初始化注册中心客户端连接通道");
                         ch.pipeline()
                                 // 添加日志处理器，记录所有进出的消息
-                                .addLast(new LoggingHandler(LogLevel.DEBUG))
-                                // 空闲检测处理器，10秒没有写操作就发送心跳
-                                .addLast(new IdleStateHandler(0, 10, 0, TimeUnit.SECONDS))
+                                .addLast(new LoggingHandler(LogLevel.DEBUG));
+                                
+                        // 只有在启用心跳的情况下才添加IdleStateHandler
+                        if (enableHeartbeat) {
+                            // 空闲检测处理器，10秒没有写操作就发送心跳
+                            ch.pipeline().addLast(new IdleStateHandler(0, 10, 0, TimeUnit.SECONDS));
+                        }
+                        
+                        // 添加编解码器和处理器
+                        ch.pipeline()
                                 // 使用简化的JSON编解码器
                                 .addLast(new SimpleJsonEncoder())
                                 .addLast(new SimpleJsonDecoder())
@@ -306,21 +313,14 @@ public class RemoteServiceRegistry implements ServiceRegistry {
                 }
                 
                 // 检查连接状态
-                if (channel == null || !channel.isActive()) {
-                    log.warn("注册中心连接不可用，尝试重新连接");
-                    // 尝试重新连接
-                    connect(host, port);
-                    
-                    // 如果仍然连接失败，退出重试
-                    if (channel == null || !channel.isActive()) {
-                        retryTimes++;
-                        if (retryTimes <= MAX_RETRY_TIMES) {
-                            log.info("连接失败，将在1秒后重试");
-                            Thread.sleep(1000); // 等待1秒后重试
-                            continue;
-                        } else {
-                            throw new RuntimeException("无法连接到注册中心");
-                        }
+                if (!ensureConnection()) {
+                    retryTimes++;
+                    if (retryTimes <= MAX_RETRY_TIMES) {
+                        log.info("连接失败，将在1秒后重试");
+                        Thread.sleep(1000); // 等待1秒后重试
+                        continue;
+                    } else {
+                        throw new RuntimeException("无法连接到注册中心");
                     }
                 }
                 
@@ -394,6 +394,9 @@ public class RemoteServiceRegistry implements ServiceRegistry {
             log.debug("服务已添加到本地缓存: {}", serviceInfo);
         }
         
+        // 确保连接可用
+        ensureConnection();
+        
         // 执行注册操作
         doRegister(serviceInfo);
     }
@@ -405,6 +408,12 @@ public class RemoteServiceRegistry implements ServiceRegistry {
         // 从本地已注册服务列表中移除
         registeredServices.remove(serviceInfo);
         log.debug("服务已从本地缓存移除: {}", serviceInfo);
+        
+        // 确保连接可用
+        if (!ensureConnection()) {
+            log.error("无法连接到注册中心，服务注销请求无法发送");
+            return;
+        }
         
         try {
             RpcMessage message = new RpcMessage();
@@ -433,15 +442,94 @@ public class RemoteServiceRegistry implements ServiceRegistry {
             log.info("服务注销成功: {}, 响应: {}", serviceInfo, result);
         } catch (Exception e) {
             log.error("注销服务失败: {}, 原因: {}", serviceInfo, e.getMessage(), e);
+            
+            // 如果是连接问题，尝试重连并重试
+            if (e.getMessage() != null && (e.getMessage().contains("closed") 
+                    || e.getMessage().contains("Connection reset") 
+                    || e.getMessage().contains("远程主机强迫关闭了一个现有的连接"))) {
+                log.warn("检测到连接已关闭，尝试重连并重新注销");
+                
+                // 确保连接已重建
+                if (ensureConnection()) {
+                    // 重试注销，但直接调用方法，不再递归调用自身
+                    try {
+                        doUnregister(serviceInfo);
+                    } catch (Exception retryE) {
+                        log.error("重试注销服务失败: {}", retryE.getMessage());
+                        throw new RuntimeException("注销服务失败", retryE);
+                    }
+                    return;
+                }
+            }
+            
             throw new RuntimeException("注销服务失败", e);
         }
     }
     
+    /**
+     * 实际执行注销的内部方法
+     */
+    private void doUnregister(ServiceInfo serviceInfo) throws Exception {
+        RpcMessage message = new RpcMessage();
+        message.setMessageType(RpcProtocol.REGISTRY_UNREGISTER_TYPE);
+        message.setSerializationType(RpcProtocol.SERIALIZATION_JSON);
+        message.setRequestId(requestIdGenerator.incrementAndGet());
+        message.setData(serviceInfo);
+        
+        log.debug("发送注销服务请求: {}", message);
+        
+        CompletableFuture<Object> future = new CompletableFuture<>();
+        pendingRequests.put(message.getRequestId(), future);
+        
+        channel.writeAndFlush(message).addListener((ChannelFutureListener) f -> {
+            if (!f.isSuccess()) {
+                pendingRequests.remove(message.getRequestId());
+                future.completeExceptionally(f.cause());
+                log.error("发送注销服务请求失败: {}", f.cause().getMessage());
+            } else {
+                log.debug("注销服务请求发送成功");
+            }
+        });
+        
+        // 等待响应，超时时间100秒
+        Object result = future.get(DEFAULT_TIMEOUT, TimeUnit.SECONDS);
+        log.info("服务注销成功: {}, 响应: {}", serviceInfo, result);
+    }
+    
+    /**
+     * 确保连接状态，如果连接断开则重新连接
+     * 
+     * @return 是否连接可用
+     */
+    private boolean ensureConnection() {
+        if (channel == null || !channel.isActive()) {
+            log.warn("检测到与注册中心的连接已断开，尝试重新连接...");
+            try {
+                connect(host, port);
+                // 如果有已注册的服务，重新注册
+                if (!registeredServices.isEmpty() && enableHeartbeat) {
+                    reregisterServices();
+                }
+                return true;
+            } catch (Exception e) {
+                log.error("重新连接注册中心失败: {}", e.getMessage());
+                return false;
+            }
+        }
+        return true;
+    }
+
     @Override
     public List<ServiceInfo> discover(String serviceName, String version, String group) {
         log.info("向注册中心查询服务: {}_{}_{}", serviceName, version, group);
         
         try {
+            // 确保连接可用
+            if (!ensureConnection()) {
+                log.error("无法连接到注册中心，服务查询失败");
+                return new ArrayList<>();
+            }
+            
             RegistryLookupRequest lookupRequest = new RegistryLookupRequest(serviceName, version, group);
             
             RpcMessage message = new RpcMessage();
@@ -481,6 +569,24 @@ public class RemoteServiceRegistry implements ServiceRegistry {
             return new ArrayList<>();
         } catch (Exception e) {
             log.error("服务查询失败: {}_{}_{}，原因: {}", serviceName, version, group, e.getMessage(), e);
+            
+            // 如果是因为连接问题，尝试一次重连
+            if (e.getMessage() != null && (e.getMessage().contains("closed") 
+                    || e.getMessage().contains("Connection reset") 
+                    || e.getMessage().contains("远程主机强迫关闭了一个现有的连接"))) {
+                log.warn("检测到连接已关闭，尝试重连并重新查询");
+                
+                // 确保连接已重建
+                if (ensureConnection()) {
+                    // 递归调用自身，但最多重试一次，避免无限递归
+                    try {
+                        return discover(serviceName, version, group);
+                    } catch (Exception retryE) {
+                        log.error("重试查询服务失败: {}", retryE.getMessage());
+                    }
+                }
+            }
+            
             return new ArrayList<>();
         }
     }
@@ -631,5 +737,14 @@ public class RemoteServiceRegistry implements ServiceRegistry {
      */
     public void sendHeartbeatPublic() {
         sendHeartbeat();
+    }
+    
+    /**
+     * 判断是否启用心跳
+     * 
+     * @return 是否启用心跳
+     */
+    public boolean isHeartbeatEnabled() {
+        return enableHeartbeat;
     }
 } 

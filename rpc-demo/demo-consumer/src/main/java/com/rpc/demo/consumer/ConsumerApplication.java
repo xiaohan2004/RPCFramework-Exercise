@@ -1,6 +1,7 @@
 package com.rpc.demo.consumer;
 
 import com.rpc.client.RpcClient;
+import com.rpc.core.annotation.RpcReference;
 import com.rpc.demo.api.HelloService;
 
 /**
@@ -8,15 +9,18 @@ import com.rpc.demo.api.HelloService;
  */
 public class ConsumerApplication {
     
+    // 使用@RpcReference注解声明RPC服务依赖
+    @RpcReference(version = "1.0.0")
+    private static HelloService helloService;
+    
+    static {
+        // 在类加载时注入服务引用
+        RpcClient.inject(ConsumerApplication.class);
+    }
+    
     public static void main(String[] args) {
-        // 创建RPC客户端
-        RpcClient client = new RpcClient();
-        
         try {
-            // 获取远程服务代理
-            HelloService helloService = client.getRemoteService(HelloService.class, "1.0.0", "");
-            
-            // 调用远程服务
+            // 直接调用服务，就像调用本地方法一样
             String result1 = helloService.sayHello("张三");
             System.out.println(result1);
             
@@ -27,9 +31,7 @@ public class ConsumerApplication {
             Thread.sleep(1000);
         } catch (Exception e) {
             e.printStackTrace();
-        } finally {
-            // 关闭客户端
-            client.close();
         }
+        // RpcClient会在JVM关闭时自动关闭
     }
 } 

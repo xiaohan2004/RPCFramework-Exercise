@@ -10,6 +10,8 @@ import com.rpc.core.protocol.RpcRequest;
 import com.rpc.registry.ServiceRegistry;
 import com.rpc.registry.ServiceRegistryFactory;
 import lombok.extern.slf4j.Slf4j;
+import com.rpc.client.processor.RpcReferenceProcessor;
+import com.rpc.core.annotation.RpcReference;
 
 import java.util.List;
 import java.util.Map;
@@ -21,6 +23,11 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 @Slf4j
 public class RpcClient {
+    /**
+     * 单例实例
+     */
+    private static volatile RpcClient INSTANCE;
+    
     /**
      * 注册中心
      */
@@ -42,9 +49,14 @@ public class RpcClient {
     private final boolean useSimpleJson;
     
     /**
-     * 构造函数
+     * RPC引用处理器
      */
-    public RpcClient() {
+    private final RpcReferenceProcessor referenceProcessor;
+    
+    /**
+     * 私有构造函数
+     */
+    private RpcClient() {
         // 读取配置
         String registryAddr = RpcConfig.getRegistryAddress();
         if (registryAddr == null || registryAddr.isEmpty()) {
@@ -59,7 +71,44 @@ public class RpcClient {
         // 读取是否使用简化JSON编解码器的配置
         this.useSimpleJson = RpcConfig.getBoolean("rpc.client.use.simple.json", true);
         
+        // 创建RPC引用处理器
+        this.referenceProcessor = new RpcReferenceProcessor(this);
+        
         log.info("RPC客户端初始化完成, 注册中心地址: {}, 使用简化JSON编解码器: {}", registryAddr, useSimpleJson);
+        
+        // 添加关闭钩子
+        Runtime.getRuntime().addShutdownHook(new Thread(this::close));
+    }
+    
+    /**
+     * 获取RpcClient单例实例
+     * 
+     * @return RpcClient实例
+     */
+    public static RpcClient getInstance() {
+        if (INSTANCE == null) {
+            synchronized (RpcClient.class) {
+                if (INSTANCE == null) {
+                    INSTANCE = new RpcClient();
+                }
+            }
+        }
+        return INSTANCE;
+    }
+    
+    /**
+     * 自动注入字段
+     * 静态方法，自动使用单例客户端
+     * 
+     * @param bean 目标对象
+     */
+    public static void inject(Object bean) {
+        try {
+            getInstance().autoWireRpcReferences(bean);
+        } catch (IllegalAccessException e) {
+            log.error("注入RPC引用失败: {}", e.getMessage(), e);
+            throw new RuntimeException("注入RPC引用失败: " + e.getMessage(), e);
+        }
     }
     
     /**
@@ -170,5 +219,15 @@ public class RpcClient {
         serviceRegistry.destroy();
         
         log.info("RPC客户端已关闭");
+    }
+    
+    /**
+     * 自动注入带有@RpcReference注解的服务引用
+     * 
+     * @param bean 目标对象
+     * @throws IllegalAccessException 反射访问异常
+     */
+    public void autoWireRpcReferences(Object bean) throws IllegalAccessException {
+        referenceProcessor.processBean(bean);
     }
 } 

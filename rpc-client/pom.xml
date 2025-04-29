@@ -14,11 +14,6 @@
     <dependencies>
         <dependency>
             <groupId>com.rpc</groupId>
-            <artifactId>rpc-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.rpc</groupId>
             <artifactId>rpc-registry</artifactId>
             <version>${project.version}</version>
         </dependency>

@@ -19,16 +19,5 @@
         <module>demo-registry</module>
     </modules>
 
-    <dependencies>
-        <dependency>
-            <groupId>com.rpc</groupId>
-            <artifactId>rpc-client</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.rpc</groupId>
-            <artifactId>rpc-server</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-    </dependencies>
+    <!-- 移除重复依赖，让子模块根据需要自行引入 -->
 </project> 

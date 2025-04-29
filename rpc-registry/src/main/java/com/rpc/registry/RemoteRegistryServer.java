@@ -61,12 +61,12 @@ public class RemoteRegistryServer {
     /**
      * 心跳超时时间（毫秒）
      */
-    private static final long HEARTBEAT_TIMEOUT = 120000; // 修改为120秒（2分钟），增加容错性
+    private static final long HEARTBEAT_TIMEOUT = 30000; // 心跳超时时间30秒
     
     /**
      * 心跳检查间隔（毫秒）
      */
-    private static final long HEARTBEAT_CHECK_INTERVAL = 10000; // 修改为10秒检查一次
+    private static final long HEARTBEAT_CHECK_INTERVAL = 10000; // 心跳检查间隔10秒
     
     /**
      * Debug模式
@@ -191,25 +191,25 @@ public class RemoteRegistryServer {
         int actuallyRemoved = 0;
 
         // 检查需要移除的服务
-        List<String> addressesToRemove = new ArrayList<>();
+        List<String> ipsToRemove = new ArrayList<>();
         for (Map.Entry<String, Long> entry : heartbeatMap.entrySet()) {
-            String address = entry.getKey();
+            String ip = entry.getKey();
             long lastHeartbeat = entry.getValue();
 
             if (now - lastHeartbeat > HEARTBEAT_TIMEOUT) {
-                addressesToRemove.add(address);
-                log.warn("服务心跳超时，立即移除: {}, 上次心跳: {}毫秒前", address, now - lastHeartbeat);
+                ipsToRemove.add(ip);
+                log.warn("服务IP心跳超时，立即移除: {}, 上次心跳: {}毫秒前", ip, now - lastHeartbeat);
             }
         }
 
         // 执行实际删除操作
-        for (String address : addressesToRemove) {
-            removeService(address);
+        for (String ip : ipsToRemove) {
+            removeService(ip);
             actuallyRemoved++;
         }
 
         if (actuallyRemoved > 0) {
-            log.info("心跳检查完成: 实际移除服务: {}, 当前服务数: {}", actuallyRemoved, getServiceCount());
+            log.info("心跳检查完成: 实际移除服务IP: {}, 当前服务数: {}", actuallyRemoved, getServiceCount());
         } else {
             log.debug("心跳检查完成: 所有服务心跳正常, 当前服务数: {}", getServiceCount());
         }
@@ -219,17 +219,28 @@ public class RemoteRegistryServer {
      * 移除指定地址的所有服务
      */
     private void removeService(String address) {
-        log.warn("移除地址的所有服务: {}", address);
-        heartbeatMap.remove(address);
+        // 提取IP部分
+        String ip = extractIpFromAddress(address);
+        if (ip == null || ip.isEmpty()) {
+            log.warn("无法从地址中提取IP: {}, 无法移除服务", address);
+            return;
+        }
         
-        // 从服务注册表中移除该地址的所有服务
+        log.warn("移除IP地址的所有服务: {}", ip);
+        heartbeatMap.remove(ip);
+        
+        // 从服务注册表中移除该IP地址的所有服务
         int removed = 0;
         for (Map.Entry<String, List<ServiceInfo>> entry : serviceMap.entrySet()) {
             String serviceKey = entry.getKey();
             List<ServiceInfo> services = entry.getValue();
             int sizeBefore = services.size();
             
-            services.removeIf(service -> service.getAddress().equals(address));
+            services.removeIf(service -> {
+                // 从服务地址中提取IP，并与当前IP比较
+                String serviceIp = extractIpFromAddress(service.getAddress());
+                return serviceIp != null && serviceIp.equals(ip);
+            });
             
             int sizeAfter = services.size();
             removed += (sizeBefore - sizeAfter);
@@ -250,7 +261,7 @@ public class RemoteRegistryServer {
             }
         }
         
-        log.warn("服务移除完成: 地址={}, 移除实例数={}, 移除空服务键={}", address, removed, emptyKeys);
+        log.warn("服务移除完成: IP={}, 移除实例数={}, 移除空服务键={}", ip, removed, emptyKeys);
     }
     
     /**
@@ -334,7 +345,19 @@ public class RemoteRegistryServer {
         
         List<ServiceInfo> serviceList = serviceMap.get(serviceKey);
         if (serviceList != null) {
-            serviceList.removeIf(svc -> svc.getAddress().equals(serviceInfo.getAddress()));
+            // 提取原始地址的 IP
+            String serviceIp = extractIpFromAddress(serviceInfo.getAddress());
+            if (serviceIp == null || serviceIp.isEmpty()) {
+                log.warn("无法从服务地址中提取IP: {}, 无法注销服务", serviceInfo.getAddress());
+                return;
+            }
+            
+            // 使用IP而不是完整地址进行比较
+            serviceList.removeIf(svc -> {
+                String svcIp = extractIpFromAddress(svc.getAddress());
+                return svcIp != null && svcIp.equals(serviceIp);
+            });
+            
             log.info("服务注销成功: {}", serviceInfo);
             
             // 如果列表为空，移除该服务条目
@@ -346,15 +369,24 @@ public class RemoteRegistryServer {
             log.warn("注销服务失败，服务不存在: {}", serviceKey);
         }
         
-        // 检查是否还有其他服务使用相同地址
+        // 提取服务 IP
+        String serviceIp = extractIpFromAddress(serviceInfo.getAddress());
+        if (serviceIp == null || serviceIp.isEmpty()) {
+            return;
+        }
+        
+        // 检查是否还有其他服务使用相同IP
         boolean hasOtherServices = serviceMap.values().stream()
                 .flatMap(List::stream)
-                .anyMatch(svc -> svc.getAddress().equals(serviceInfo.getAddress()));
+                .anyMatch(svc -> {
+                    String svcIp = extractIpFromAddress(svc.getAddress());
+                    return svcIp != null && svcIp.equals(serviceIp);
+                });
         
-        // 如果没有其他服务使用此地址，则移除心跳记录
+        // 如果没有其他服务使用此IP，则移除心跳记录
         if (!hasOtherServices) {
-            heartbeatMap.remove(serviceInfo.getAddress());
-            log.info("地址{}没有其他服务，移除心跳记录", serviceInfo.getAddress());
+            heartbeatMap.remove(serviceIp);
+            log.info("IP {}没有其他服务，移除心跳记录", serviceIp);
         }
         
         // 打印当前注册表状态
@@ -415,10 +447,46 @@ public class RemoteRegistryServer {
             return;
         }
 
-        long now = System.currentTimeMillis();
-        heartbeatMap.put(address, now);
+        // 从地址中提取IP部分（忽略端口号）
+        String ip = extractIpFromAddress(address);
+        if (ip == null || ip.isEmpty()) {
+            log.warn("无法从地址中提取IP: {}", address);
+            return;
+        }
 
-        log.debug("更新服务心跳: {}", address);
+        long now = System.currentTimeMillis();
+        heartbeatMap.put(ip, now);  // 使用IP作为key更新服务心跳
+
+        // 输出更新后的 heartbeatMap
+        log.debug("更新服务心跳: 原地址={}, IP={}, 当前时间: {}, 上次心跳时间: {}, 当前heartbeatMap: {}",
+                address, ip, now, heartbeatMap.get(ip), heartbeatMap);
+    }
+
+    /**
+     * 从地址中提取IP部分
+     * 支持以下格式：
+     * - "ip:port"
+     * - "/ip:port"
+     * - "ip"
+     */
+    private String extractIpFromAddress(String address) {
+        if (address == null || address.isEmpty()) {
+            return null;
+        }
+
+        // 移除开头的斜杠（如果有）
+        if (address.startsWith("/")) {
+            address = address.substring(1);
+        }
+
+        // 分离IP和端口
+        int colonIndex = address.lastIndexOf(':');
+        if (colonIndex > 0) {
+            return address.substring(0, colonIndex);
+        }
+
+        // 如果没有冒号，则认为整个字符串就是IP
+        return address;
     }
 
     /**

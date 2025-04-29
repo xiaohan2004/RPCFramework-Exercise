@@ -58,11 +58,12 @@ public class RegistryServerHandler extends SimpleChannelInboundHandler<RpcMessag
             
             // 处理心跳请求
             if (messageType == RpcProtocol.HEARTBEAT_REQUEST_TYPE) {
-                // 更新服务心跳
+                // 更新服务心跳 - 获取客户端的远程地址
                 String address = ctx.channel().remoteAddress().toString();
                 if (address.startsWith("/")) {
                     address = address.substring(1);
                 }
+                // 注册中心仅使用 IP 更新心跳（忽略端口）
                 registryServer.updateHeartbeat(address);
                 
                 responseMsg.setMessageType(RpcProtocol.HEARTBEAT_RESPONSE_TYPE);

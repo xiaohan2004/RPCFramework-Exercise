@@ -316,4 +316,214 @@ java -jar rpc-registry.jar 9000
 </configuration>
 ```
 
-开启DEBUG级别日志可以帮助排查序列化、网络传输等问题。 
+开启DEBUG级别日志可以帮助排查序列化、网络传输等问题。
+
+## 条件服务调用功能
+
+框架提供了一个强大的条件服务调用功能，允许用户根据特定条件在远程服务和本地服务之间动态切换，提高系统的灵活性和可用性。
+
+### 功能概述
+
+条件服务调用功能允许根据条件选择服务调用方式：
+
+1. 当条件为**真**时调用**远程服务**
+2. 当条件为**假**时调用**本地服务**
+
+使用简单的字符串格式定义条件：
+
+1. `time0900-1800`：时间条件，在9:00-18:00期间使用远程服务，其他时间使用本地服务
+2. `ip192.168.1.1`：IP条件，当客户端IP为192.168.1.1时使用远程服务
+3. 空字符串("")：无条件，默认使用远程服务（但可以启用本地服务作为始终使用本地服务的选项）
+4. 自定义条件：可以通过注册自定义条件处理器实现更复杂的逻辑
+
+### 使用步骤
+
+#### 1. 注册本地服务实现
+
+首先，需要注册本地服务实现到`LocalServiceFactory`：
+
+```java
+import com.rpc.client.local.LocalServiceFactory;
+import com.rpc.demo.api.HelloService;
+
+// 创建本地服务实现
+HelloService localHelloService = new HelloServiceLocalImpl();
+
+// 注册到本地服务工厂
+LocalServiceFactory.registerLocalService(HelloService.class, "1.0.0", "", localHelloService);
+```
+
+#### 2. 在RpcReference注解中配置条件
+
+根据需要在`@RpcReference`注解中配置条件属性：
+
+```java
+import com.rpc.core.annotation.RpcReference;
+import com.rpc.demo.api.HelloService;
+
+public class MyConsumer {
+    // 在每天9:00-18:00期间使用远程服务，其他时间使用本地服务
+    @RpcReference(
+        version = "1.0.0",
+        enableLocalService = true,
+        condition = "time0900-1800"
+    )
+    private HelloService helloService;
+}
+```
+
+#### 3. 自动注入服务引用
+
+使用`RpcClient.inject`方法注入服务引用：
+
+```java
+import com.rpc.client.RpcClient;
+
+// 注入实例字段
+RpcClient.inject(this);
+
+// 或注入静态字段
+RpcClient.inject(MyConsumer.class);
+```
+
+### 内置条件类型
+
+#### 时间条件
+
+使用`time`前缀，后面接开始时间和结束时间（24小时制，不带冒号），中间用`-`分隔：
+
+```java
+@RpcReference(
+    version = "1.0.0",
+    enableLocalService = true,
+    condition = "time0900-1800" // 9:00-18:00之间使用远程服务
+)
+private HelloService timeBasedService;
+```
+
+#### IP条件
+
+使用`ip`前缀，后面接IP地址：
+
+```java
+@RpcReference(
+    version = "1.0.0",
+    enableLocalService = true,
+    condition = "ip192.168.1.100" // 当客户端IP为192.168.1.100时使用远程服务
+)
+private HelloService ipBasedService;
+```
+
+### 自定义条件类型
+
+可以注册自定义条件处理器以支持更多条件类型：
+
+```java
+// 注册处理"count"开头的条件，表示计数条件
+ConditionEvaluator.registerConditionHandler("count", condition -> {
+    try {
+        // 假设格式为"count3"，表示每3次调用使用1次远程服务
+        int n = Integer.parseInt(condition.substring(5));
+        int current = counter.incrementAndGet();
+        if (current >= n) {
+            counter.set(0);
+            return true; // 每n次调用返回1次true，使用远程服务
+        }
+        return false;
+    } catch (Exception e) {
+        return false;
+    }
+});
+```
+
+### 完整示例
+
+```java
+import com.rpc.client.RpcClient;
+import com.rpc.client.local.ConditionEvaluator;
+import com.rpc.client.local.LocalServiceFactory;
+import com.rpc.core.annotation.RpcReference;
+import com.rpc.demo.api.HelloService;
+import java.util.function.Predicate;
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class SimpleConditionDemo {
+    private static final AtomicInteger counter = new AtomicInteger(0);
+    
+    // 在工作时间（9:00-18:00）使用远程服务，其他时间使用本地服务
+    @RpcReference(
+        version = "1.0.0",
+        enableLocalService = true,
+        condition = "time0900-1800"
+    )
+    private HelloService timeBasedService;
+    
+    // 每3次调用使用1次远程服务
+    @RpcReference(
+        version = "1.0.0",
+        enableLocalService = true,
+        condition = "count3"
+    )
+    private HelloService countBasedService;
+    
+    static {
+        // 注册自定义条件处理器
+        ConditionEvaluator.registerConditionHandler("count", condition -> {
+            try {
+                int n = Integer.parseInt(condition.substring(5));
+                int current = counter.incrementAndGet();
+                if (current >= n) {
+                    counter.set(0);
+                    return true; // 使用远程服务
+                }
+                return false; // 使用本地服务
+            } catch (Exception e) {
+                return false;
+            }
+        });
+    }
+    
+    public SimpleConditionDemo() {
+        // 注册本地服务实现
+        LocalServiceFactory.registerLocalService(
+            HelloService.class, 
+            new HelloServiceLocalImpl()
+        );
+        
+        // 注入服务引用
+        RpcClient.inject(this);
+    }
+    
+    // 本地服务实现示例
+    private static class HelloServiceLocalImpl implements HelloService {
+        @Override
+        public String sayHello(String name) {
+            return "Hello " + name + " (from local service)";
+        }
+        
+        @Override
+        public String getServerTime() {
+            return "Local time: " + new java.util.Date();
+        }
+    }
+    
+    public static void main(String[] args) {
+        SimpleConditionDemo demo = new SimpleConditionDemo();
+        
+        // 调用服务（框架会根据条件判断使用本地服务还是远程服务）
+        System.out.println(demo.timeBasedService.sayHello("Alice"));
+        
+        for (int i = 0; i < 5; i++) {
+            System.out.println("Count-based call " + (i + 1) + ": " + 
+                demo.countBasedService.sayHello("Bob"));
+        }
+    }
+}
+```
+
+### 注意事项
+
+1. 必须启用`enableLocalService = true`才能使用条件服务调用功能
+2. 在调用服务之前必须注册本地服务实现，否则当需要使用本地服务时会回退到远程服务
+3. 自定义条件处理器应在使用前注册
+4. 当条件字符串为空时，默认使用远程服务 

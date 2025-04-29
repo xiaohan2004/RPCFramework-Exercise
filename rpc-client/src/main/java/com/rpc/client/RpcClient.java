@@ -111,7 +111,7 @@ public class RpcClient {
             throw new RuntimeException("注入RPC引用失败: " + e.getMessage(), e);
         }
     }
-    
+
     /**
      * 创建服务代理
      *

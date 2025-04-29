@@ -35,4 +35,19 @@ public @interface RpcReference {
      * 是否异步调用
      */
     boolean async() default false;
+    
+    /**
+     * 是否启用本地服务调用
+     */
+    boolean enableLocalService() default false;
+    
+    /**
+     * 调用条件。满足条件时调用远程服务，不满足时调用本地服务。
+     * 支持以下格式：
+     * 1. 空字符串：默认使用远程服务
+     * 2. time0900-1800：在9:00-18:00之间使用远程服务，其他时间使用本地服务
+     * 3. ip192.168.1.1：当客户端IP为192.168.1.1时使用远程服务
+     * 4. 其他自定义格式，需要在ConditionEvaluator中实现相应的解析和评估逻辑
+     */
+    String condition() default "";
 } 

@@ -58,7 +58,7 @@ mvn clean package
 
 ## 更多信息
 
-这是一个演示该RPC框架功能的示例项目[RPC框架演示项目](https://github.com/xiaohan2004/RPCFramework-Exercise-Example)
+这是一个演示该RPC框架功能的示例项目[RPC框架演示项目](https://github.com/xiaohan2004/RPCFramework-Exercise-Example)。
 
 有关使用说明和详细步骤，请参考[RPCQuickStart.md](RPCQuickStart.md)文件。
 

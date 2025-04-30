@@ -6,7 +6,7 @@
 
     <groupId>com.rpc</groupId>
     <artifactId>rpc-framework</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -17,6 +17,7 @@
         <module>rpc-common</module>
         <module>rpc-demo</module>
         <module>test</module>
+        <module>rpc-assembly</module>
     </modules>
 
     <properties>

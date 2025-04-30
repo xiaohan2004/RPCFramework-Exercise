@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.1.1"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.1.1 http://maven.apache.org/xsd/assembly-2.1.1.xsd">
+    <id>distribution</id>
+    <formats>
+        <format>zip</format>
+        <format>jar</format>
+    </formats>
+    <includeBaseDirectory>true</includeBaseDirectory>
+    
+    <!-- 使用dependencySets替代moduleSets -->
+    <dependencySets>
+        <dependencySet>
+            <outputDirectory>lib</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <includes>
+                <include>com.rpc:rpc-core</include>
+                <include>com.rpc:rpc-server</include>
+                <include>com.rpc:rpc-client</include>
+                <include>com.rpc:rpc-registry</include>
+                <include>com.rpc:rpc-common</include>
+            </includes>
+        </dependencySet>
+        <dependencySet>
+            <outputDirectory>lib</outputDirectory>
+            <useProjectArtifact>false</useProjectArtifact>
+            <useTransitiveDependencies>true</useTransitiveDependencies>
+            <excludes>
+                <exclude>com.rpc:*</exclude>
+            </excludes>
+        </dependencySet>
+    </dependencySets>
+    
+    <fileSets>
+        <!-- 项目文档文件 -->
+        <fileSet>
+            <directory>${project.basedir}/..</directory>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>README.md</include>
+                <include>RPCQuickStart.md</include>
+                <include>LICENSE</include>
+                <include>DISTRIBUTION_README.md</include>
+                <include>install-to-maven.bat</include>
+                <include>install-to-maven.sh</include>
+            </includes>
+        </fileSet>
+        
+        <!-- 项目示例代码 -->
+        <fileSet>
+            <directory>${project.basedir}/../rpc-demo</directory>
+            <outputDirectory>examples</outputDirectory>
+            <includes>
+                <include>**/*</include>
+            </includes>
+        </fileSet>
+        
+        <!-- resources目录下的文件 -->
+        <fileSet>
+            <directory>${project.basedir}/src/main/resources</directory>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>*.md</include>
+            </includes>
+        </fileSet>
+        
+        <!-- 可执行的注册中心JAR -->
+        <fileSet>
+            <directory>${project.basedir}/../rpc-registry/target</directory>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>rpc-registry-*-executable.jar</include>
+            </includes>
+        </fileSet>
+    </fileSets>
+</assembly> 

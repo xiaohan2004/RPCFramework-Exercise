@@ -23,21 +23,21 @@
     <dependency>
         <groupId>com.rpc</groupId>
         <artifactId>rpc-server</artifactId>
-        <version>1.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </dependency>
     
     <!-- 如果需要作为服务消费者 -->
     <dependency>
         <groupId>com.rpc</groupId>
         <artifactId>rpc-client</artifactId>
-        <version>1.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </dependency>
     
     <!-- 如果需要启动注册中心 -->
     <dependency>
         <groupId>com.rpc</groupId>
         <artifactId>rpc-registry</artifactId>
-        <version>1.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </dependency>
 </dependencies>
 ```
@@ -46,7 +46,37 @@
 
 ### 2. 启动注册中心
 
-在使用RPC框架之前，需要确保注册中心已经启动。可以创建一个单独的模块来启动注册中心：
+在使用RPC框架之前，需要确保注册中心已经启动。您有以下几种方式启动注册中心：
+
+#### 方式一：使用可执行JAR文件（推荐）
+
+如果您使用了分发包，可以直接使用其中包含的可执行JAR文件启动注册中心服务器：
+
+```bash
+java -jar rpc-registry-1.0.0-executable.jar [port] [debug|test|debugtest]
+```
+
+参数说明：
+- `port`: 注册中心端口号，默认为8000
+- `debug`: 启用调试模式，会输出更详细的日志
+- `test`: 自动注册测试服务，方便测试框架功能
+- `debugtest`: 同时启用调试模式和测试服务
+
+示例：
+```bash
+# 启动在8000端口
+java -jar rpc-registry-1.0.0-executable.jar 8000
+
+# 启动在9000端口，并启用调试模式
+java -jar rpc-registry-1.0.0-executable.jar 9000 debug
+
+# 启动在8000端口，并自动注册测试服务
+java -jar rpc-registry-1.0.0-executable.jar 8000 test
+```
+
+#### 方式二：编写代码启动注册中心
+
+可以创建一个单独的模块来启动注册中心：
 
 ```java
 // RegistryServerStarter.java
@@ -80,11 +110,7 @@ public class RegistryServerStarter {
 }
 ```
 
-也可以通过命令行启动，指定端口：
-
-```bash
-java -jar rpc-registry.jar 9000
-```
+> 注意：注册中心服务器自身已经包含了关闭钩子，可以确保进程正常退出时优雅关闭，所以上述代码中的关闭钩子可以省略。
 
 ### 3. 创建服务接口
 

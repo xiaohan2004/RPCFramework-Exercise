@@ -413,6 +413,28 @@ private HelloService helloService;
 内置的条件类型包括：
 - 时间条件: `time0900-1800`（9:00-18:00之间使用远程服务）
 - IP条件: `ip192.168.1.100`（当客户端IP为192.168.1.100时使用远程服务）
+- 布尔条件: `booltrue`（始终使用远程服务）
+- 布尔条件: `boolfalse`（始终使用本地服务）
+
+实际使用示例：
+
+```java
+// 强制使用远程服务
+@RpcReference(
+    version = "1.0.0",
+    enableLocalService = true,
+    condition = "booltrue"
+)
+private UserService userService;
+
+// 强制使用本地服务，适用于开发测试或脱机运行场景
+@RpcReference(
+    version = "1.0.0",
+    enableLocalService = true,
+    condition = "boolfalse"
+)
+private OrderService orderService;
+```
 
 ### 服务回退机制
 

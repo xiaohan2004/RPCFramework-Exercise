@@ -132,6 +132,12 @@ public class ConditionEvaluator {
             boolean result = evaluateIpCondition(condition);
             log.debug("IP条件评估结果: '{}'={}", condition, result);
             return result;
+        } else if (condition.equals("booltrue")) {
+            log.debug("检测到布尔条件: '{}'", condition);
+            return true; // booltrue始终返回true，表示使用远程服务
+        } else if (condition.equals("boolfalse")) {
+            log.debug("检测到布尔条件: '{}'", condition);
+            return false; // boolfalse始终返回false，表示使用本地服务
         }
         
         // 尝试使用自定义条件处理器评估
@@ -342,7 +348,18 @@ public class ConditionEvaluator {
      * 注册内置条件处理器
      */
     private static void registerBuiltInConditionHandlers() {
-        // 可以在这里注册更多内置的条件处理器
+        // 注册布尔条件处理器
+        registerConditionHandler("bool", condition -> {
+            if (condition.equals("booltrue")) {
+                log.debug("布尔条件booltrue始终返回true，使用远程服务");
+                return true;
+            } else if (condition.equals("boolfalse")) {
+                log.debug("布尔条件boolfalse始终返回false，使用本地服务");
+                return false;
+            }
+            log.warn("未知的布尔条件格式: '{}'，期望: 'booltrue'或'boolfalse'", condition);
+            return false;
+        });
     }
     
     /**

@@ -42,7 +42,9 @@
 </dependencies>
 ```
 
-> 注意：rpc-server、rpc-client和rpc-registry已经依赖了rpc-core模块，所以不需要单独引入rpc-core。
+> 注意：rpc-server、rpc-client和rpc-registry已经依赖了rpc-core模块，所以不需要单独引入rpc-core。（理想情况）
+
+> 注意：如果发生了找不到类的情况，请还是单独引入缺失的模块。（现实情况）
 
 ### 2. 启动注册中心
 
